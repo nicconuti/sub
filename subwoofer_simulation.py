@@ -16,11 +16,7 @@ except Exception as e:
 
 import sys
 import numpy as np
-import math
-import pandas as pd
-import matplotlib.patches as patches
 from matplotlib.path import Path
-import matplotlib.transforms as mtransforms
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QLineEdit, QSlider, QCheckBox, QRadioButton,
@@ -34,10 +30,13 @@ from constants import *
 from optimization_worker import OptimizationWorker
 from spl_calculations import calculate_spl_vectorized
 from ui_setup import UISetupMixin
+from drawing import DrawingMixin
+from array_setup import ArraySetupMixin
+from project_io import ProjectIOMixin
 
 
 
-class SubwooferSimApp(QMainWindow, UISetupMixin):
+class SubwooferSimApp(QMainWindow, UISetupMixin, DrawingMixin, ArraySetupMixin, ProjectIOMixin):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Simulatore Posizionamento Subwoofer Avanzato")
@@ -108,100 +107,6 @@ class SubwooferSimApp(QMainWindow, UISetupMixin):
         self.update_optim_freq_fields_visibility()
         # _update_array_ui() is now called within _setup_group_array_ui
 
-    def disegna_subwoofer_e_elementi(self):
-        for i, sub_ in enumerate(self.sorgenti):
-            color = "green" if i == self.current_sub_idx else "black"
-            if sub_.get('group_id') is not None:
-                if sub_['is_group_master']: color = "purple"
-                elif i == self.current_sub_idx: color = "darkorange"
-                else: color = "blue"
-
-            center_x, center_y = sub_['x'], sub_['y']
-            angle_rad = sub_['angle']
-            
-            display_angle_deg = 90 - np.degrees(angle_rad)
-            
-            width = sub_.get('width', DEFAULT_SUB_WIDTH)
-            depth = sub_.get('depth', DEFAULT_SUB_DEPTH)
-            
-            rect = patches.Rectangle((-depth / 2, -width / 2), depth, width, linewidth=1.5, edgecolor=color,
-                                     facecolor=color, alpha=0.6, gid=f"rect_sub_{sub_['id']}", picker=True, zorder=2.5)
-            transform = mtransforms.Affine2D().rotate_deg(display_angle_deg) + mtransforms.Affine2D().translate(center_x, center_y) + self.ax.transData
-            rect.set_transform(transform)
-            self.ax.add_patch(rect)
-            sub_['rect_artist'] = rect 
-
-            arrow_end_x = center_x + ARROW_LENGTH * np.sin(angle_rad)
-            arrow_end_y = center_y + ARROW_LENGTH * np.cos(angle_rad)
-            arrow = patches.FancyArrowPatch((center_x, center_y), (arrow_end_x, arrow_end_y),
-                                            mutation_scale=20, arrowstyle='->', color='dimgray', linewidth=1.5,
-                                            zorder=2.6, gid=f"arrow_sub_{sub_['id']}", picker=True)
-            self.ax.add_patch(arrow)
-            sub_['arrow_artist'] = arrow 
-
-            pol_char = '+' if sub_['polarity'] > 0 else '-'
-            group_info = ""
-            if sub_.get('group_id') is not None:
-                group_info = f"G{sub_['group_id']}"
-                if sub_['is_group_master']: group_info += " (M)"
-                group_info += ", "
-            sub_text_info = (f"S{sub_.get('id', i + 1)}: {sub_.get('spl_rms', DEFAULT_SUB_SPL_RMS):.0f}dB\n"
-                             f"{group_info}{sub_.get('gain_db', 0.0):.1f}dB, {sub_['delay_ms']:.1f}ms, Pol {pol_char}")
-            
-            text_offset = max(width, depth) / 2 + 0.15 
-            self.ax.text(center_x, center_y + text_offset, sub_text_info, color=color, fontsize=6,
-                         ha="center", va="bottom", zorder=6)
-
-    def disegna_array_direction_indicators(self):
-        for group_id, group_info in self.lista_gruppi_array.items():
-            members = [s for s in self.sorgenti if s.get('group_id') == group_id]
-            if not members: continue
-
-            center_x = np.mean([s['x'] for s in members])
-            center_y = np.mean([s['y'] for s in members])
-            
-            steering_deg_nord = group_info.get('steering_deg', 0)
-            steering_deg_est = 90 - steering_deg_nord
-            
-            wedge = patches.Wedge(
-                center=(center_x, center_y), r=ARRAY_INDICATOR_RADIUS,
-                theta1=steering_deg_est - ARRAY_INDICATOR_CONE_WIDTH_DEG / 2,
-                theta2=steering_deg_est + ARRAY_INDICATOR_CONE_WIDTH_DEG / 2,
-                facecolor='cyan', edgecolor='blue', alpha=0.25, zorder=1.5
-            )
-            self.ax.add_patch(wedge)
-
-    def disegna_stanza_e_vertici(self):
-        if self.punti_stanza and len(self.punti_stanza) >=3:
-            points_pos = [p['pos'] for p in self.punti_stanza]
-            patch = patches.Polygon(points_pos, closed=True, fill=None, edgecolor="blue", linewidth=2, zorder=1)
-            self.ax.add_patch(patch)
-            for i, vtx_data in enumerate(self.punti_stanza):
-                x, y = vtx_data['pos']
-                vtx_data['plot'] = self.ax.plot(x,y,marker="o",ms=7,color="red",picker=7,gid=f'stanza_vtx_{i}', zorder=5.2)[0]
-
-    def disegna_aree_target_e_avoidance(self):
-        for area_list, type_prefix in [(self.lista_target_areas, 'target'), (self.lista_avoidance_areas, 'avoid')]:
-            for area_data in area_list:
-                area_data['plots'] = [] 
-                if area_data.get('active', False) and len(area_data.get('punti', [])) >= 3:
-                    is_selected_target = type_prefix == 'target' and self.current_target_area_idx != -1 and area_data['id'] == self.lista_target_areas[self.current_target_area_idx]['id']
-                    is_selected_avoid = type_prefix == 'avoid' and self.current_avoidance_area_idx != -1 and area_data['id'] == self.lista_avoidance_areas[self.current_avoidance_area_idx]['id']
-                    is_selected = is_selected_target or is_selected_avoid
-                    color, m_color, ls = ('green', 'lime', '--') if type_prefix == 'target' else ('red', 'orangered', ':')
-                    patch = patches.Polygon(area_data['punti'], closed=True, fill=True, edgecolor=color, facecolor=color, alpha=0.3 if is_selected else 0.15, ls=ls, zorder=0.5)
-                    self.ax.add_patch(patch)
-                    for v_idx, v in enumerate(area_data['punti']):
-                        plot_artist = self.ax.plot(v[0], v[1], marker='P' if type_prefix=='target' else 'X', ms=9, color=m_color, picker=7, zorder=5.1)[0]
-                        area_data['plots'].append(plot_artist)
-
-    def disegna_griglia(self):
-        if self.grid_show_enabled and self.grid_snap_spacing > 0:
-            xlim = self.ax.get_xlim(); ylim = self.ax.get_ylim()
-            x_ticks = np.arange(round(xlim[0]/self.grid_snap_spacing)*self.grid_snap_spacing, xlim[1], self.grid_snap_spacing)
-            y_ticks = np.arange(round(ylim[0]/self.grid_snap_spacing)*self.grid_snap_spacing, ylim[1], self.grid_snap_spacing)
-            for x in x_ticks: self.ax.axvline(x, color='gray', linestyle=':', linewidth=0.5, alpha=0.6, zorder=-1)
-            for y in y_ticks: self.ax.axhline(y, color='gray', linestyle=':', linewidth=0.5, alpha=0.6, zorder=-1)
 
     def auto_fit_view_to_room(self):
         if not hasattr(self, 'ax'): return
@@ -559,13 +464,6 @@ class SubwooferSimApp(QMainWindow, UISetupMixin):
         self.aggiorna_ui_sub_fields()
         self.full_redraw(preserve_view=True)
         
-    def _normalize_delays(self, configs_list):
-        if not configs_list: return
-        all_delays = [config['delay_ms'] for config in configs_list]
-        min_delay = min(all_delays)
-        if min_delay != 0:
-            for config in configs_list:
-                config['delay_ms'] -= min_delay
 
     def _update_array_ui(self):
         array_type = self.array_type_combo.currentText()
@@ -680,150 +578,7 @@ class SubwooferSimApp(QMainWindow, UISetupMixin):
             import traceback
             traceback.print_exc()
 
-    def _add_new_subs_as_group(self, configs_list, array_type, array_params, ref_sub_idx_to_remove=-1):
-        if not configs_list: return
 
-        if ref_sub_idx_to_remove != -1 and ref_sub_idx_to_remove < len(self.sorgenti):
-            self.sorgenti.pop(ref_sub_idx_to_remove)
-        
-        self._update_max_group_id()
-        new_group_id = self.next_group_id
-        self.lista_gruppi_array[new_group_id] = {'type': array_type, **array_params}
-
-        start_index_of_new_subs = len(self.sorgenti)
-        for config in configs_list:
-            new_sub_data = config.copy()
-            new_sub_data['group_id'] = new_group_id
-            
-            defaults = {'id': self.next_sub_id, 'param_locks': {'angle': True, 'delay': True, 'gain': False, 'polarity': True}}
-            for k, v in defaults.items(): new_sub_data.setdefault(k, v)
-            
-            new_sub_data['gain_lin'] = 10**(new_sub_data.get('gain_db',0)/20.0)
-            new_sub_data['pressure_val_at_1m_relative_to_pref'] = 10**(new_sub_data.get('spl_rms', DEFAULT_SUB_SPL_RMS)/20.0)
-            
-            self.sorgenti.append(new_sub_data)
-            self.next_sub_id += 1
-
-        master_idx_in_group = next((i for i, conf in enumerate(configs_list) if conf.get('is_group_master')), 0)
-        self.current_sub_idx = start_index_of_new_subs + master_idx_in_group
-        
-        if array_type == "Lineare" and len(configs_list) > 1:
-            first_sub_pos = np.array([configs_list[0]['x'], configs_list[0]['y']])
-            last_sub_pos = np.array([configs_list[-1]['x'], configs_list[-1]['y']])
-            total_length = np.linalg.norm(last_sub_pos - first_sub_pos)
-            self.array_info_label.setText(f"Array Lineare creato. Lunghezza Totale: {total_length:.2f} m")
-        else:
-            self.array_info_label.setText(f"Gruppo {array_type} creato.")
-
-        self.full_redraw(preserve_view=True)
-        self.aggiorna_ui_sub_fields()
-
-    def setup_line_array_steered(self, center_x, center_y, num_elements, spacing, orientation_deg, steering_deg, coverage_deg, c, base_params, array_params, ref_sub_idx):
-        orientation_rad = np.radians(orientation_deg)
-        steering_rad = np.radians(steering_deg)
-        coverage_rad = np.radians(coverage_deg)
-        sub_physical_orientation = orientation_rad
-        start_offset = -(num_elements - 1) / 2.0 * spacing
-        array_length = (num_elements - 1) * spacing
-        new_configs = []
-
-        line_dir_x = np.cos(orientation_rad)
-        line_dir_y = -np.sin(orientation_rad)
-        
-        for i in range(num_elements):
-            offset = start_offset + i * spacing
-            sub_x = center_x + offset * line_dir_x
-            sub_y = center_y + offset * line_dir_y
-            
-            steering_dir_x, steering_dir_y = np.sin(steering_rad), np.cos(steering_rad)
-            dot_product = (sub_x - center_x) * steering_dir_x + (sub_y - center_y) * steering_dir_y
-            delay_steering_sec = dot_product / c
-
-            delay_coverage_sec = 0.0
-            if coverage_rad > np.radians(1) and array_length > 0:
-                try:
-                    virtual_radius = (array_length / 2.0) / math.sin(coverage_rad / 2.0)
-                    if abs(offset) <= virtual_radius:
-                        delay_coverage_sec = (virtual_radius - math.sqrt(virtual_radius**2 - offset**2)) / c
-                except (ValueError, ZeroDivisionError): pass
-            
-            total_delay_ms = (delay_steering_sec + delay_coverage_sec) * 1000.0
-            new_conf = base_params.copy()
-            new_conf.update({'x':sub_x, 'y':sub_y, 'angle':sub_physical_orientation, 'delay_ms':total_delay_ms, 'is_group_master':(i == num_elements // 2), 'param_locks':{'angle':True,'delay':True,'gain':False,'polarity':False}})
-            new_configs.append(new_conf)
-            
-        self._normalize_delays(new_configs)
-        self._add_new_subs_as_group(new_configs, "Lineare", array_params, ref_sub_idx)
-
-    def setup_vortex_array(self, center_x, center_y, num_elements, radius, mode, freq, start_angle_deg, steering_deg, c, base_params, array_params, ref_sub_idx):
-        angle_step = 2 * np.pi / num_elements
-        start_angle_rad = np.radians(start_angle_deg)
-        steering_rad = np.radians(steering_deg)
-        new_configs = []
-
-        for n in range(num_elements):
-            phi = start_angle_rad + n * angle_step
-            sub_x = center_x + radius * np.sin(phi)
-            sub_y = center_y + radius * np.cos(phi)
-            sub_orientation = phi + np.pi/2
-            
-            delay_vortex_ms = ((mode * n) / (num_elements * freq)) * 1000.0
-            
-            pos_vector_x = sub_x - center_x
-            pos_vector_y = sub_y - center_y
-            steering_dir_x, steering_dir_y = np.sin(steering_rad), np.cos(steering_rad)
-            projected_distance = pos_vector_x * steering_dir_x + pos_vector_y * steering_dir_y
-            delay_steering_ms = (-projected_distance / c) * 1000.0
-            total_delay_ms = delay_vortex_ms + delay_steering_ms
-
-            new_conf = base_params.copy()
-            new_conf.update({'x': sub_x, 'y': sub_y, 'angle': sub_orientation, 'delay_ms': total_delay_ms, 
-                             'is_group_master': (n==0), 'param_locks': {'angle': True, 'delay': True, 'gain': False, 'polarity': False}})
-            new_configs.append(new_conf)
-            
-        self._normalize_delays(new_configs)
-        self._add_new_subs_as_group(new_configs, "Vortex", array_params, ref_sub_idx)
-        self.status_bar.showMessage(f"Array Vortex di {num_elements} elementi creato.", 5000)
-
-    def setup_cardioid_pair(self, center_x, center_y, spacing, c, angle_deg, base_params, ref_sub_idx):
-        angle_rad = np.radians(angle_deg)
-        dir_x, dir_y = np.sin(angle_rad), np.cos(angle_rad)
-
-        front_sub = base_params.copy()
-        front_sub.update({'x': center_x + dir_x * spacing / 2, 'y': center_y + dir_y * spacing / 2,
-                          'angle': angle_rad, 'delay_ms': 0, 'is_group_master': True, 'polarity': 1,
-                          'param_locks':{'angle':True,'delay':True,'gain':False,'polarity':True}})
-        
-        rear_sub = base_params.copy()
-        rear_sub.update({'x': center_x - dir_x * spacing / 2, 'y': center_y - dir_y * spacing / 2,
-                         'angle': angle_rad, 'delay_ms': (spacing / c) * 1000.0, 'polarity': -1, 'is_group_master': False,
-                         'param_locks':{'angle':True,'delay':True,'gain':False,'polarity':True}})
-        
-        self._normalize_delays([front_sub, rear_sub])
-        self._add_new_subs_as_group([front_sub, rear_sub], "Cardioide", {'steering_deg': angle_deg}, ref_sub_idx)
-        self.status_bar.showMessage("Coppia Cardioide creata.", 5000)
-
-    def setup_end_fire_array(self, center_x, center_y, num_elements, spacing, c, angle_deg, base_params, ref_sub_idx):
-        angle_rad = np.radians(angle_deg)
-        dir_x, dir_y = np.sin(angle_rad), np.cos(angle_rad)
-        new_configs = []
-        start_offset = -(num_elements - 1) / 2.0 * spacing
-
-        for k in range(num_elements):
-            offset = start_offset + k * spacing
-            sub_x = center_x + offset * dir_x
-            sub_y = center_y + offset * dir_y
-            
-            delay_ms = (k * spacing / c) * 1000.0
-            
-            new_conf = base_params.copy()
-            new_conf.update({'x':sub_x, 'y':sub_y, 'angle': angle_rad, 'delay_ms':delay_ms, 'is_group_master':(k==0),  # Master set to the first element
-                             'param_locks':{'angle':True,'delay':True,'gain':False,'polarity':False}})
-            new_configs.append(new_conf)
-
-        self._normalize_delays(new_configs)
-        self._add_new_subs_as_group(new_configs, "End-Fire", {'steering_deg': angle_deg}, ref_sub_idx)
-        self.status_bar.showMessage(f"Array End-Fire di {num_elements} elementi creato.", 5000)
     
     def select_prev_target_area(self):
         if not self.lista_target_areas: self.current_target_area_idx = -1
@@ -1243,12 +998,6 @@ class SubwooferSimApp(QMainWindow, UISetupMixin):
             
         self.plot_canvas.canvas.draw_idle()
     
-    def disegna_elementi_statici_senza_spl(self):
-        self.disegna_stanza_e_vertici()
-        self.disegna_aree_target_e_avoidance()
-        self.disegna_subwoofer_e_elementi()
-        self.disegna_array_direction_indicators()
-        self.disegna_griglia()
 
     def update_optim_freq_fields_visibility(self, *args):
         is_copertura = self.radio_copertura.isChecked()
@@ -1429,156 +1178,6 @@ class SubwooferSimApp(QMainWindow, UISetupMixin):
             self.status_text_optim.setText(message)
         QApplication.processEvents()
     
-    # ASSICURATI CHE QUESTA FUNZIONE SIA INDENTATA CORRETTAMENTE DENTRO LA CLASSE SubwooferSimApp
-
-    def save_project_to_excel(self):
-        filepath, _ = QFileDialog.getSaveFileName(self, "Salva Progetto Completo", "", "File Excel (*.xlsx)")
-        if not filepath:
-            return
-
-        try:
-            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-                if self.sorgenti:
-                    sub_data_to_save = []
-                    for sub in self.sorgenti:
-                        sub_data_to_save.append({
-                            'ID': sub.get('id'), 'X (m)': sub.get('x'), 'Y (m)': sub.get('y'),
-                            'Angolo (°)': np.degrees(sub.get('angle')), 'Gain (dB)': sub.get('gain_db'),
-                            'Polarità': sub.get('polarity'), 'Delay (ms)': sub.get('delay_ms'),
-                            'Larghezza (m)': sub.get('width'), 'Profondità (m)': sub.get('depth'),
-                            'SPL (dB)': sub.get('spl_rms'), 'group_id': sub.get('group_id')
-                        })
-                    df_subs = pd.DataFrame(sub_data_to_save)
-                    df_subs.to_excel(writer, sheet_name='Subwoofers', index=False)
-
-                if self.punti_stanza:
-                    room_verts = [p['pos'] for p in self.punti_stanza]
-                    df_room = pd.DataFrame(room_verts, columns=['X', 'Y'])
-                    df_room.to_excel(writer, sheet_name='Stanza', index=False)
-
-                if self.lista_target_areas:
-                    target_areas_data = []
-                    for area in self.lista_target_areas:
-                        for vtx in area['punti']:
-                            target_areas_data.append({
-                                'Area_ID': area['id'], 'Nome': area['nome'], 'Attiva': area['active'],
-                                'Vertice_X': vtx[0], 'Vertice_Y': vtx[1]
-                            })
-                    df_target = pd.DataFrame(target_areas_data)
-                    df_target.to_excel(writer, sheet_name='Aree_Target', index=False)
-
-                if self.lista_avoidance_areas:
-                    avoid_areas_data = []
-                    for area in self.lista_avoidance_areas:
-                        for vtx in area['punti']:
-                            avoid_areas_data.append({
-                                'Area_ID': area['id'], 'Nome': area['nome'], 'Attiva': area['active'],
-                                'Vertice_X': vtx[0], 'Vertice_Y': vtx[1]
-                            })
-                    df_avoid = pd.DataFrame(avoid_areas_data)
-                    df_avoid.to_excel(writer, sheet_name='Aree_Evitamento', index=False)
-            
-            self.status_bar.showMessage(f"Progetto completo salvato in {filepath}", 5000)
-
-        except Exception as e:
-            QMessageBox.critical(self, "Errore di Salvataggio", f"Impossibile salvare il file di progetto:\n{e}")
-
-    # CANCELLA LA VECCHIA FUNZIONE E SOSTITUISCILA CON QUESTA
-# ASSICURATI CHE SIA INDENTATA CORRETTAMENTE DENTRO LA CLASSE
-
-    def load_project_from_excel(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Carica Progetto Completo", "", "File Excel (*.xlsx)")
-        if not filepath:
-            return
-            
-        try:
-            # PASSO 1: PULIZIA DELLO STATO CORRENTE
-            self.sorgenti.clear()
-            self.punti_stanza.clear()
-            self.lista_target_areas.clear()
-            self.lista_avoidance_areas.clear()
-            self.lista_gruppi_array.clear()
-            self.current_sub_idx = -1
-            self.next_sub_id = 1
-            self.next_group_id = 1
-            self.next_target_area_id = 1
-            self.next_avoidance_area_id = 1
-            
-            # PASSO 2: CARICAMENTO DATI DAI FOGLI
-            try:
-                df_subs = pd.read_excel(filepath, sheet_name='Subwoofers')
-                for index, row in df_subs.iterrows():
-                    config = {
-                        'id': int(row['ID']), 'x': row['X (m)'], 'y': row['Y (m)'],
-                        'angle': np.radians(row['Angolo (°)']), 'gain_db': row['Gain (dB)'],
-                        'polarity': row['Polarità'], 'delay_ms': row['Delay (ms)'],
-                        'width': row.get('Larghezza (m)', self.global_sub_width),
-                        'depth': row.get('Profondità (m)', self.global_sub_depth),
-                        'spl_rms': row.get('SPL (dB)', self.global_sub_spl_rms),
-                        'group_id': int(row['group_id']) if pd.notna(row['group_id']) else None,
-                    }
-                    self.add_subwoofer(specific_config=config, redraw=False)
-                if 'ID' in df_subs.columns and pd.notna(df_subs['ID'].max()):
-                    self.next_sub_id = int(df_subs['ID'].max()) + 1
-            except Exception:
-                print("Foglio 'Subwoofers' non trovato o errore nel caricarlo. Ignorato.")
-
-            try:
-                df_room = pd.read_excel(filepath, sheet_name='Stanza')
-                for index, row in df_room.iterrows():
-                    self.punti_stanza.append({'pos': [row['X'], row['Y']], 'plot': None})
-            except Exception:
-                print("Foglio 'Stanza' non trovato o errore nel caricarlo. Ignorato.")
-
-            try:
-                df_target = pd.read_excel(filepath, sheet_name='Aree_Target')
-                if not df_target.empty:
-                    for area_id, group in df_target.groupby('Area_ID'):
-                        punti = group[['Vertice_X', 'Vertice_Y']].values.tolist()
-                        area_data = {
-                            'id': int(area_id), 'nome': group['Nome'].iloc[0],
-                            'active': bool(group['Attiva'].iloc[0]), 'punti': punti, 'plots': []
-                        }
-                        self.lista_target_areas.append(area_data)
-                    if pd.notna(df_target['Area_ID'].max()):
-                        self.next_target_area_id = int(df_target['Area_ID'].max()) + 1
-            except Exception:
-                print("Foglio 'Aree_Target' non trovato o errore nel caricarlo. Ignorato.")
-
-            try:
-                df_avoid = pd.read_excel(filepath, sheet_name='Aree_Evitamento')
-                if not df_avoid.empty:
-                    for area_id, group in df_avoid.groupby('Area_ID'):
-                        punti = group[['Vertice_X', 'Vertice_Y']].values.tolist()
-                        area_data = {
-                            'id': int(area_id), 'nome': group['Nome'].iloc[0],
-                            'active': bool(group['Attiva'].iloc[0]), 'punti': punti, 'plots': []
-                        }
-                        self.lista_avoidance_areas.append(area_data)
-                    if pd.notna(df_avoid['Area_ID'].max()):
-                        self.next_avoidance_area_id = int(df_avoid['Area_ID'].max()) + 1
-            except Exception:
-                print("Foglio 'Aree_Evitamento' non trovato o errore nel caricarlo. Ignorato.")
-            
-            # PASSO 3: AGGIORNAMENTO FINALE
-            all_group_ids = {s['group_id'] for s in self.sorgenti if s['group_id'] is not None}
-            for gid in all_group_ids:
-                group_members = [s for s in self.sorgenti if s.get('group_id') == gid]
-                if group_members:
-                    group_members[0]['is_group_master'] = True
-
-            if self.sorgenti: self.current_sub_idx = 0
-            
-            self.aggiorna_ui_sub_fields()
-            self.update_ui_for_selected_target_area()
-            self.update_ui_for_selected_avoidance_area()
-            self.full_redraw()
-            self.status_bar.showMessage(f"Progetto completo caricato da {filepath}", 5000)
-
-        except Exception as e:
-            QMessageBox.critical(self, "Errore di Caricamento", f"Impossibile caricare il file di progetto:\n{e}")
-            import traceback
-            traceback.print_exc()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
