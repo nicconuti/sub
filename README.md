@@ -14,10 +14,11 @@ pip install -r requirements.txt
 python build_installer.py
 ```
 
-- On Windows this produces `dist/subwoofer_simulation.exe`.
-- On macOS running the script creates `dist/subwoofer_simulation` which can be
-  packaged with `pkgbuild` or similar to create a `.pkg` installer.
+The script now creates two executables and, on macOS, a `.pkg` installer:
+
+- `dist/subwoofer_simulation.exe` – GUI application
+- `dist/subwoofer_simulation_console.exe` – console-enabled version
+- `dist/subwoofer_simulation.pkg` on macOS if `pkgbuild` is available
 
 After building, you can use platform-specific tools such as Inno Setup (Windows)
-or `pkgbuild`/`productbuild` (macOS) to wrap the executable in a standard
-installer package.
+or `productbuild` (macOS) to further customise the installer packages.
