@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "subwoofer-sim"
+version = "0.1.0"
+description = "Simulatore Posizionamento Subwoofer Avanzato"
+requires-python = ">=3.9"
+authors = [{name = "Unknown"}]
+dependencies = [
+    "PyQt6>=6.9,<7",
+    "numpy>=2.3,<3",
+    "matplotlib>=3.10,<4",
+    "pandas>=2.3,<3",
+]
+
+[project.scripts]
+subwoofer-sim = "subwoofer_simulation:main"
