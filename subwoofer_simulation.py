@@ -1179,7 +1179,8 @@ class SubwooferSimApp(QMainWindow, UISetupMixin, DrawingMixin, ArraySetupMixin, 
         QApplication.processEvents()
     
 
-if __name__ == '__main__':
+def main():
+    """Punto di ingresso per avviare l'applicazione GUI."""
     app = QApplication(sys.argv)
     try:
         main_win = SubwooferSimApp()
@@ -1190,3 +1191,7 @@ if __name__ == '__main__':
         traceback.print_exc()
         sys.exit(1)
     sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()
