@@ -1,19 +1,3 @@
-# --- START DIAGNOSTIC CODE ---
-import sys
-import os
-try:
-    import matplotlib
-    import PyQt6
-    print("--- DIAGNOSTICS ---")
-    print("Python Executable:", sys.executable)
-    print("Matplotlib Version:", matplotlib.__version__)
-    print("Matplotlib Path:", os.path.dirname(matplotlib.__file__))
-    print("PyQt6 Path:", os.path.dirname(PyQt6.__file__))
-    print("--- END DIAGNOSTICS ---\n\n")
-except Exception as e:
-    print(f"DIAGNOSTIC ERROR: {e}")
-# --- END DIAGNOSTIC CODE ---
-
 import sys
 import numpy as np
 from matplotlib.path import Path
@@ -1179,7 +1163,8 @@ class SubwooferSimApp(QMainWindow, UISetupMixin, DrawingMixin, ArraySetupMixin, 
         QApplication.processEvents()
     
 
-if __name__ == '__main__':
+def main():
+    """Punto di ingresso per avviare l'applicazione GUI."""
     app = QApplication(sys.argv)
     try:
         main_win = SubwooferSimApp()
@@ -1190,3 +1175,7 @@ if __name__ == '__main__':
         traceback.print_exc()
         sys.exit(1)
     sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()
