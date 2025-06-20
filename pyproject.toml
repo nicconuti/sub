@@ -16,4 +16,9 @@ dependencies = [
 ]
 
 [project.scripts]
-subwoofer-sim = "subwoofer_simulation:main"
+subwoofer-sim-build = "build_installer:main"
+
+[project.optional-dependencies]
+build = [
+    "pyinstaller>=6,<7",
+]
