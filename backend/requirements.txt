@@ -1,0 +1,39 @@
+# FastAPI WebSocket Server Requirements
+# Core framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+websockets==12.0
+
+# Data validation and serialization
+pydantic==2.5.0
+
+# CORS and middleware
+python-multipart==0.0.6
+
+# Async support
+asyncio-mqtt==0.16.1
+
+# Existing core dependencies (from main project)
+numpy>=1.24.0
+numba>=0.58.0
+scipy>=1.11.0
+pandas>=2.0.0
+
+# Data export support
+openpyxl>=3.1.0
+xlsxwriter>=3.1.0
+
+# Optional: Development and testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+httpx>=0.25.0
+
+# Optional: Production deployment
+gunicorn>=21.2.0
+redis>=5.0.0  # For future caching
+
+# Binary data compression for large arrays
+msgpack>=1.0.7
+
+# Optional: Monitoring
+structlog>=23.2.0

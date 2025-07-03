@@ -5,7 +5,16 @@
       "Bash(python:*)",
       "Bash(ls:*)",
       "Bash(rm:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm create:*)",
+      "Bash(npm install)",
+      "Bash(npm install:*)",
+      "Bash(grep:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run type-check:*)",
+      "Bash(curl:*)",
+      "Bash(pip install:*)"
     ],
     "deny": []
   }
