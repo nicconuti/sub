@@ -1,0 +1,1 @@
+"""Core functionality for subwoofer simulation and optimization."""

@@ -1,0 +1,52 @@
+# ================================================================
+# SUBWOOFER SIMULATION TOOL - MINIMAL RUNTIME DEPENDENCIES
+# ================================================================
+# 
+# This file contains only the essential dependencies needed to run
+# the subwoofer simulation tool. Use this for production deployments
+# or when you only need the core functionality.
+#
+# For full development setup, use: requirements.txt
+# ================================================================
+
+# Core numerical computing
+numpy>=1.21.0,<2.0.0
+
+# Data manipulation and analysis  
+pandas>=1.3.0,<3.0.0
+
+# High-performance numerical computing with JIT compilation
+numba>=0.56.0,<1.0.0
+
+# Scientific computing library
+scipy>=1.7.0,<2.0.0
+
+# Plotting and visualization
+matplotlib>=3.5.0,<4.0.0
+
+# GUI framework for Qt6
+PyQt6>=6.2.0,<7.0.0
+
+# Excel file support
+openpyxl>=3.0.0,<4.0.0
+
+# ================================================================
+# INSTALLATION INSTRUCTIONS
+# ================================================================
+#
+# 1. Create virtual environment:
+#    python -m venv .venv
+#
+# 2. Activate virtual environment:
+#    # On Linux/macOS:
+#    source .venv/bin/activate
+#    # On Windows:
+#    .venv\Scripts\activate
+#
+# 3. Install minimal dependencies:
+#    pip install -r requirements-minimal.txt
+#
+# 4. Run the application:
+#    python main.py
+#
+# ================================================================
