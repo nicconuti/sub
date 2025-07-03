@@ -15,8 +15,10 @@ from core.config import SimulationConfig, DEFAULT_WINDOW_GEOMETRY
 from core.data_loader import DataLoader
 from core.exporter import ProjectExporter
 from core.diagnostics import run_diagnostics
+from core.simulation_controller import SimulationController
 from ui.control_panel import ControlPanel
 from ui.dialogs import FileDialogs, PreferencesDialog
+from ui.event_handlers import CanvasEventHandler
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,12 @@ class MainWindow(QMainWindow):
         self.data_loader = DataLoader()
         self.exporter = ProjectExporter()
         self.file_dialogs = FileDialogs(self)
+        
+        # Initialize simulation controller
+        self.simulation_controller = SimulationController(self.config)
+        
+        # Initialize event handler
+        self.event_handler = CanvasEventHandler()
         
         # Application state
         self.current_project_path = None
@@ -98,6 +106,11 @@ class MainWindow(QMainWindow):
         self.canvas = MatplotlibCanvas(self, width=12, height=9)
         self.visualizer = SubwooferVisualizer(self.canvas)
         main_splitter.addWidget(self.canvas)
+        
+        # Connect canvas mouse events to event handler
+        self.canvas.canvas.mpl_connect('button_press_event', self.on_canvas_press)
+        self.canvas.canvas.mpl_connect('motion_notify_event', self.on_canvas_motion)
+        self.canvas.canvas.mpl_connect('button_release_event', self.on_canvas_release)
         
         # Set splitter proportions
         main_splitter.setSizes([300, 900])
@@ -242,6 +255,20 @@ class MainWindow(QMainWindow):
         self.control_panel.parameter_changed.connect(self.on_parameter_changed)
         self.control_panel.simulation_requested.connect(self.run_simulation)
         self.control_panel.optimization_requested.connect(self.run_optimization)
+        
+        # Connect simulation controller signals
+        self.simulation_controller.spl_map_updated.connect(self.on_spl_map_updated)
+        self.simulation_controller.simulation_progress.connect(self.status_bar.showMessage)
+        self.simulation_controller.simulation_error.connect(self.on_simulation_error)
+        self.simulation_controller.optimization_finished.connect(self.on_optimization_finished)
+        self.simulation_controller.project_modified.connect(self.project_changed.emit)
+        
+        # Connect event handler signals
+        self.event_handler.source_selected.connect(self.on_source_selected)
+        self.event_handler.source_moved.connect(self.on_source_moved)
+        self.event_handler.source_rotated.connect(self.on_source_rotated)
+        self.event_handler.vertex_moved.connect(self.on_vertex_moved)
+        self.event_handler.room_vertex_moved.connect(self.on_room_vertex_moved)
     
     def _run_initial_diagnostics(self):
         """Run initial system diagnostics."""
@@ -428,8 +455,14 @@ class MainWindow(QMainWindow):
     def run_simulation(self):
         """Run acoustic simulation."""
         try:
-            if len(self.project_data['sources']) == 0:
+            sources = self.project_data.get('sources', [])
+            if len(sources) == 0:
                 QMessageBox.warning(self, 'Warning', 'No sources defined. Please add sources first.')
+                return
+            
+            room_vertices = self.project_data.get('room_vertices', [])
+            if len(room_vertices) < 3:
+                QMessageBox.warning(self, 'Warning', 'Room must have at least 3 vertices.')
                 return
             
             self.simulation_running = True
@@ -438,17 +471,32 @@ class MainWindow(QMainWindow):
             # Get simulation parameters
             sim_params = self.control_panel.get_simulation_parameters()
             
-            # Update project data
-            self.project_data['simulation_params'].update(sim_params)
+            # Update simulation controller parameters
+            self.simulation_controller.set_frequency(sim_params['frequency'])
+            self.simulation_controller.set_speed_of_sound(sim_params['speed_of_sound'])
+            self.simulation_controller.set_grid_parameters(0.1)  # Default grid resolution
+            self.simulation_controller.set_spl_range(
+                sim_params['min_spl'], 
+                sim_params['max_spl'], 
+                sim_params['auto_scale_spl']
+            )
             
-            # Run simulation (this would typically be done in a separate thread)
-            # For now, just update the display
-            self.update_display()
+            # Convert sources to numpy array if needed
+            if isinstance(sources, list):
+                sources_array = self._convert_sources_to_array(sources)
+            else:
+                sources_array = sources
             
-            self.simulation_running = False
-            self.simulation_updated.emit()
-            self.status_bar.showMessage("Simulation completed")
-            self.logger.info("Simulation completed")
+            # Run SPL calculation
+            success = self.simulation_controller.calculate_spl_map(sources_array, room_vertices)
+            
+            if success:
+                self.simulation_running = False
+                self.simulation_updated.emit()
+                self.logger.info("Simulation completed")
+            else:
+                self.simulation_running = False
+                self.status_bar.showMessage("Simulation failed")
             
         except Exception as e:
             self.simulation_running = False
@@ -465,7 +513,8 @@ class MainWindow(QMainWindow):
     def run_optimization(self):
         """Run optimization algorithm."""
         try:
-            if len(self.project_data['sources']) == 0:
+            sources = self.project_data.get('sources', [])
+            if len(sources) == 0:
                 QMessageBox.warning(self, 'Warning', 'No sources defined. Please add sources first.')
                 return
             
@@ -474,12 +523,8 @@ class MainWindow(QMainWindow):
             # Get optimization parameters
             optim_params = self.control_panel.get_optimization_parameters()
             
-            # Run optimization (this would typically be done in a separate thread)
-            # For now, just show a message
-            QMessageBox.information(self, 'Optimization', 'Optimization feature will be implemented.')
-            
-            self.status_bar.showMessage("Optimization completed")
-            self.logger.info("Optimization completed")
+            # Start optimization using simulation controller
+            self.simulation_controller.start_optimization(self.project_data, optim_params)
             
         except Exception as e:
             self.logger.error(f"Error running optimization: {e}")
@@ -631,6 +676,91 @@ class MainWindow(QMainWindow):
         
         self.setWindowTitle(title)
     
+    # Helper methods
+    def _convert_sources_to_array(self, sources_list: List[Dict[str, Any]]) -> np.ndarray:
+        """Convert sources list to numpy structured array."""
+        from core.config import SUB_DTYPE
+        
+        if not sources_list:
+            return np.array([], dtype=SUB_DTYPE)
+        
+        source_tuples = []
+        for source in sources_list:
+            source_tuple = (
+                source.get('x', 0.0),
+                source.get('y', 0.0),
+                source.get('pressure_val_at_1m_relative_to_pref', 1.0),
+                source.get('gain_lin', 1.0),
+                source.get('angle', 0.0),
+                source.get('delay_ms', 0.0),
+                source.get('polarity', 1)
+            )
+            source_tuples.append(source_tuple)
+        
+        return np.array(source_tuples, dtype=SUB_DTYPE)
+    
+    # Canvas event handlers
+    def on_canvas_press(self, event):
+        """Handle canvas mouse press events."""
+        self.event_handler.handle_press_event(event, self.project_data)
+    
+    def on_canvas_motion(self, event):
+        """Handle canvas mouse motion events."""
+        handled = self.event_handler.handle_motion_event(event, self.project_data)
+        if handled:
+            self.update_display()
+    
+    def on_canvas_release(self, event):
+        """Handle canvas mouse release events."""
+        self.event_handler.handle_release_event(event)
+    
+    # Event handler signal receivers
+    def on_source_selected(self, source_idx: int):
+        """Handle source selection."""
+        # Update control panel to show selected source
+        self.logger.info(f"Source {source_idx} selected")
+    
+    def on_source_moved(self, source_idx: int, x: float, y: float):
+        """Handle source movement."""
+        self.simulation_controller.update_source_position(self.project_data, source_idx, x, y)
+    
+    def on_source_rotated(self, source_idx: int, angle: float):
+        """Handle source rotation."""
+        self.simulation_controller.update_source_angle(self.project_data, source_idx, angle)
+    
+    def on_vertex_moved(self, area_type: str, area_idx: int, vertex_idx: int, x: float, y: float):
+        """Handle area vertex movement."""
+        self.simulation_controller.update_area_vertex(self.project_data, area_type, area_idx, vertex_idx, x, y)
+    
+    def on_room_vertex_moved(self, vertex_idx: int, x: float, y: float):
+        """Handle room vertex movement."""
+        self.simulation_controller.update_room_vertex(self.project_data, vertex_idx, x, y)
+    
+    # Simulation signal receivers
+    def on_spl_map_updated(self, X_grid: np.ndarray, Y_grid: np.ndarray, SPL_grid: np.ndarray):
+        """Handle SPL map update from simulation controller."""
+        try:
+            # Update visualizer with new SPL map
+            spl_range = self.simulation_controller.get_current_spl_range()
+            self.visualizer.plot_spl_map(X_grid, Y_grid, SPL_grid, spl_range)
+            self.visualizer.refresh_display()
+            self.logger.info("SPL map updated in visualization")
+        except Exception as e:
+            self.logger.error(f"Error updating SPL visualization: {e}")
+    
+    def on_simulation_error(self, error_message: str):
+        """Handle simulation errors."""
+        QMessageBox.critical(self, 'Simulation Error', error_message)
+        self.simulation_running = False
+    
+    def on_optimization_finished(self, results: Dict[str, Any]):
+        """Handle optimization completion."""
+        self.logger.info("Optimization finished")
+        # Update project data with optimization results
+        self.project_data['optimization_results'] = results
+        self.update_display()
+        QMessageBox.information(self, 'Optimization', 'Optimization completed successfully.')
+    
     # Close event
     def closeEvent(self, event):
         """Handle application close event."""
@@ -652,4 +782,9 @@ class MainWindow(QMainWindow):
                 return
         
         self.logger.info("Application closing")
+        
+        # Cleanup simulation controller
+        if hasattr(self, 'simulation_controller'):
+            self.simulation_controller.cleanup()
+        
         event.accept()
