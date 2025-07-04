@@ -134,11 +134,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     event_data = json.loads(message)
                     event = ClientEvent.parse_obj(event_data)
-                    logger.info(f"📋 Parsed event: {event.type}")
+                    logger.info(f"📋 Parsed event: {event.type} (request_id: {event.request_id})")
                 except Exception as e:
                     logger.error(f"❌ Invalid event format from {session_id}: {e}")
                     logger.error(f"📄 Raw message: {message}")
-                    await websocket_manager.send_error(session_id, "invalid_event", str(e))
+                    
+                    # Try to extract request_id from raw message for proper error matching
+                    request_id = None
+                    try:
+                        if isinstance(event_data, dict):
+                            request_id = event_data.get('request_id')
+                    except:
+                        pass
+                    
+                    await websocket_manager.send_error(session_id, "invalid_event", str(e), request_id)
                     continue
                 
                 # Route event to appropriate handler
@@ -151,7 +160,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 break
             except Exception as e:
                 logger.error(f"❌ Error processing message from {session_id}: {e}")
-                await websocket_manager.send_error(session_id, "processing_error", str(e))
+                await websocket_manager.send_error(session_id, "processing_error", str(e), None)
                 
     except WebSocketDisconnect:
         pass
@@ -176,11 +185,11 @@ async def route_client_event(session_id: str, event: ClientEvent):
             await handle_interactive_event(session_id, event)
         else:
             logger.warning(f"⚠️ Unknown event type: {event.type}")
-            await websocket_manager.send_error(session_id, "unknown_event", f"Unknown event type: {event.type}")
+            await websocket_manager.send_error(session_id, "unknown_event", f"Unknown event type: {event.type}", event.request_id)
             
     except Exception as e:
         logger.error(f"❌ Error routing event {event.type} from {session_id}: {e}")
-        await websocket_manager.send_error(session_id, "routing_error", str(e))
+        await websocket_manager.send_error(session_id, "routing_error", str(e), getattr(event, 'request_id', None))
 
 async def handle_simulation_event(session_id: str, event: ClientEvent):
     """Handle simulation-related events"""
@@ -189,37 +198,37 @@ async def handle_simulation_event(session_id: str, event: ClientEvent):
     try:
         if event.type == "simulation:start":
             logger.info(f"🚀 Starting simulation for session {session_id}")
-            await simulation_service.start_simulation(session_id, event.data)
+            await simulation_service.start_simulation(session_id, event.data, event.request_id)
             
             # Send immediate confirmation response
             await websocket_manager.send_to_session(session_id, {
                 "type": "simulation:started",
                 "data": {"status": "started", "message": "Simulation started successfully"},
-                "request_id": getattr(event, 'request_id', None),
+                "request_id": event.request_id,
                 "timestamp": asyncio.get_event_loop().time()
             })
             
         elif event.type == "simulation:stop":
             logger.info(f"🛑 Stopping simulation for session {session_id}")
-            await simulation_service.stop_simulation(session_id)
+            await simulation_service.stop_simulation(session_id, event.request_id)
             
             # Send immediate confirmation response
             await websocket_manager.send_to_session(session_id, {
                 "type": "simulation:stopped", 
                 "data": {"status": "stopped", "message": "Simulation stopped successfully"},
-                "request_id": getattr(event, 'request_id', None),
+                "request_id": event.request_id,
                 "timestamp": asyncio.get_event_loop().time()
             })
             
         elif event.type == "simulation:parameter_update":
             logger.info(f"⚙️ Updating simulation parameters for session {session_id}")
-            await simulation_service.update_parameter(session_id, event.data)
+            await simulation_service.update_parameter(session_id, event.data, event.request_id)
             
             # Send immediate confirmation response
             await websocket_manager.send_to_session(session_id, {
                 "type": "simulation:parameter_updated",
                 "data": {"status": "updated", "message": "Parameters updated successfully"},
-                "request_id": getattr(event, 'request_id', None),
+                "request_id": event.request_id,
                 "timestamp": asyncio.get_event_loop().time()
             })
             
@@ -229,7 +238,7 @@ async def handle_simulation_event(session_id: str, event: ClientEvent):
     except Exception as e:
         logger.error(f"❌ Error handling simulation event {event.type}: {e}")
         # Send error response
-        await websocket_manager.send_error(session_id, f"simulation_{event.type}_error", str(e))
+        await websocket_manager.send_error(session_id, f"simulation_{event.type}_error", str(e), event.request_id)
 
 async def handle_project_event(session_id: str, event: ClientEvent):
     """Handle project management events"""

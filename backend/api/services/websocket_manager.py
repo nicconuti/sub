@@ -54,8 +54,8 @@ class WebSocketManager:
         self._cleanup_task: Optional[asyncio.Task] = None
         
         # Configuration
-        self.ping_interval = 30  # seconds
-        self.ping_timeout = 10   # seconds
+        self.ping_interval = 60  # seconds (reduced frequency)
+        self.ping_timeout = 30   # seconds (increased timeout)
         self.max_connections = 1000
         
     async def startup(self):
@@ -183,16 +183,22 @@ class WebSocketManager:
             await self.disconnect(session_id)
             return False
             
-    async def send_error(self, session_id: str, error_code: str, message: str):
+    async def send_error(self, session_id: str, error_code: str, message: str, request_id: str = None):
         """Send error message to session"""
-        await self.send_to_session(session_id, {
+        error_response = {
             "type": "error",
             "data": {
                 "code": error_code,
                 "message": message,
                 "timestamp": time.time()
             }
-        })
+        }
+        
+        # Include request_id if provided for proper request-response matching
+        if request_id:
+            error_response["request_id"] = request_id
+            
+        await self.send_to_session(session_id, error_response)
         
     async def broadcast_to_project(self, project_id: str, message: Dict, exclude_session: Optional[str] = None):
         """
@@ -291,17 +297,24 @@ class WebSocketManager:
                 stale_sessions = []
                 
                 for session_id, session in self.active_connections.items():
-                    # Check if session is stale
-                    if current_time - session.last_ping > self.ping_timeout * 2:
+                    # Check if session is stale (more lenient timeout)
+                    time_since_ping = current_time - session.last_ping
+                    max_timeout = self.ping_timeout * 3  # Increased from 2x to 3x
+                    
+                    if time_since_ping > max_timeout:
+                        logger.warning(f"⏰ Session {session_id} timed out ({time_since_ping:.1f}s > {max_timeout}s)")
                         stale_sessions.append(session_id)
                         continue
                         
-                    # Send ping
-                    try:
-                        await session.websocket.ping()
-                        session.last_ping = current_time
-                    except:
-                        stale_sessions.append(session_id)
+                    # Send ping only if it's been a while since last ping
+                    if time_since_ping > self.ping_timeout / 2:
+                        try:
+                            await session.websocket.ping()
+                            session.last_ping = current_time
+                            logger.debug(f"📡 Pinged session {session_id}")
+                        except Exception as e:
+                            logger.warning(f"📡 Ping failed for session {session_id}: {e}")
+                            stale_sessions.append(session_id)
                         
                 # Cleanup stale sessions
                 for session_id in stale_sessions:

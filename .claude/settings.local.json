@@ -14,7 +14,10 @@
       "Bash(npm run dev:*)",
       "Bash(npm run type-check:*)",
       "Bash(curl:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(node:*)",
+      "Bash(pkill:*)",
+      "Bash(kill:*)"
     ],
     "deny": []
   }

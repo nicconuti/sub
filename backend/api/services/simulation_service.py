@@ -92,7 +92,7 @@ class SimulationService:
         self.active_simulations.clear()
         self.session_simulations.clear()
         
-    async def start_simulation(self, session_id: str, event_data: Dict[str, Any]) -> bool:
+    async def start_simulation(self, session_id: str, event_data: Dict[str, Any], request_id: str = None) -> bool:
         """
         Start new SPL simulation with real-time streaming
         
@@ -110,7 +110,8 @@ class SimulationService:
                 await self.websocket_manager.send_error(
                     session_id, 
                     "simulation_limit", 
-                    f"Maximum {self.max_simulations_per_session} simulations per session"
+                    f"Maximum {self.max_simulations_per_session} simulations per session",
+                    request_id
                 )
                 return False
             
@@ -122,13 +123,13 @@ class SimulationService:
                 
                 if not sources:
                     await self.websocket_manager.send_error(
-                        session_id, "invalid_params", "At least one source required"
+                        session_id, "invalid_params", "At least one source required", request_id
                     )
                     return False
                     
             except Exception as e:
                 await self.websocket_manager.send_error(
-                    session_id, "validation_error", f"Invalid parameters: {str(e)}"
+                    session_id, "validation_error", f"Invalid parameters: {str(e)}", request_id
                 )
                 return False
             
@@ -163,7 +164,7 @@ class SimulationService:
             )
             return False
             
-    async def stop_simulation(self, session_id: str, simulation_id: Optional[str] = None) -> bool:
+    async def stop_simulation(self, session_id: str, request_id: str = None, simulation_id: Optional[str] = None) -> bool:
         """
         Stop specific simulation or all simulations for session
         
@@ -183,7 +184,7 @@ class SimulationService:
                     return True
                 else:
                     await self.websocket_manager.send_error(
-                        session_id, "simulation_not_found", f"Simulation {simulation_id} not found"
+                        session_id, "simulation_not_found", f"Simulation {simulation_id} not found", request_id
                     )
                     return False
             else:
@@ -201,7 +202,7 @@ class SimulationService:
             logger.error(f"❌ Error stopping simulation for {session_id}: {e}")
             return False
             
-    async def update_parameter(self, session_id: str, event_data: Dict[str, Any]) -> bool:
+    async def update_parameter(self, session_id: str, event_data: Dict[str, Any], request_id: str = None) -> bool:
         """
         Update simulation parameter with real-time validation
         
@@ -218,7 +219,7 @@ class SimulationService:
             
             if not param_name:
                 await self.websocket_manager.send_error(
-                    session_id, "invalid_param", "Parameter name required"
+                    session_id, "invalid_param", "Parameter name required", request_id
                 )
                 return False
             

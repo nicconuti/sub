@@ -424,7 +424,8 @@ export const useSimulationStore = create<SimulationState>()(
                 last_calculated: new Date().toISOString(),
               };
             }
-            state.currentProject.results.spl_maps[splMap.frequency.toString()] = splMap;
+            const frequencyKey = (splMap.frequency || 80).toString();
+            state.currentProject.results.spl_maps[frequencyKey] = splMap;
             state.currentProject.results.last_calculated = new Date().toISOString();
             state.currentProject.updated_at = new Date().toISOString();
           }
@@ -559,8 +560,72 @@ export const simulationActions = {
     useSimulationStore.getState().addSplChunk(chunkData.chunk_index, chunkData);
   },
   
-  onSimulationComplete: (splMap: SplMapData) => {
-    useSimulationStore.getState().completeSplMap(splMap);
+  onSimulationComplete: (completionData: any) => {
+    const state = useSimulationStore.getState();
+    
+    // Reconstruct SPL map from chunks
+    if (Object.keys(state.splChunks).length > 0) {
+      // Get chunks and sort by index
+      const sortedChunks = Object.entries(state.splChunks)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .map(([_, chunk]) => chunk);
+      
+      if (sortedChunks.length > 0) {
+        // Reconstruct the complete SPL map from chunks
+        const firstChunk = sortedChunks[0];
+        const totalChunks = firstChunk.total_chunks || sortedChunks.length;
+        
+        // Combine all X, Y, and SPL data properly
+        console.log('🔧 Reconstructing SPL map from', sortedChunks.length, 'chunks');
+        
+        const combinedX: number[][] = [];
+        const combinedY: number[][] = [];
+        const combinedSPL: number[][] = [];
+        
+        sortedChunks.forEach((chunk, index) => {
+          if (chunk.X && chunk.Y && chunk.SPL && 
+              Array.isArray(chunk.X) && Array.isArray(chunk.Y) && Array.isArray(chunk.SPL)) {
+            
+            console.log(`📊 Chunk ${index}: ${chunk.X.length} rows`);
+            
+            // Each chunk contains a 2D array - concatenate the rows
+            // chunk.X is [[x1,x2,x3], [x4,x5,x6], ...] 
+            // We want to combine all chunks into one big 2D array
+            chunk.X.forEach(row => combinedX.push(row));
+            chunk.Y.forEach(row => combinedY.push(row));
+            chunk.SPL.forEach(row => combinedSPL.push(row));
+          }
+        });
+        
+        console.log('✅ Combined data:', {
+          X: combinedX.length,
+          Y: combinedY.length, 
+          SPL: combinedSPL.length
+        });
+        
+        // Create complete SPL map
+        const completeSplMap: SplMapData = {
+          X: combinedX,
+          Y: combinedY,
+          SPL: combinedSPL,
+          frequency: completionData.statistics?.frequency || 80, // Use frequency from completion data
+          timestamp: Date.now(),
+          statistics: completionData.statistics || {}
+        };
+        
+        useSimulationStore.getState().completeSplMap(completeSplMap);
+      }
+    }
+    
+    // Update simulation state to completed
+    useSimulationStore.setState((state) => ({
+      ...state,
+      isSimulating: false,
+      simulationProgress: {
+        progress: 100,
+        current_step: 'complete'
+      }
+    }));
   },
   
   onOptimizationGeneration: (generationData: any) => {

@@ -123,17 +123,91 @@ export const SplViewer: React.FC<SplViewerProps> = ({
   // Calculate SPL range automatically if not provided
   const calculatedSplRange = useMemo(() => {
     if (splRange) return splRange;
-    if (!splData) return [60, 120];
+    if (!splData || !splData.SPL) return [60, 120];
     
-    const flatSpl = splData.SPL.flat();
-    const minSpl = Math.min(...flatSpl);
-    const maxSpl = Math.max(...flatSpl);
-    const padding = (maxSpl - minSpl) * 0.1;
-    
-    return [
-      Math.max(0, minSpl - padding),
-      Math.min(150, maxSpl + padding)
-    ] as [number, number];
+    try {
+      // Safety check to prevent stack overflow
+      if (!Array.isArray(splData.SPL) || splData.SPL.length === 0) {
+        console.warn('⚠️ Invalid SPL data structure');
+        return [60, 120];
+      }
+      
+      // Limit depth to prevent infinite recursion and limit data size
+      let flatSpl: number[] = [];
+      
+      try {
+        // First, check the structure and depth
+        if (!Array.isArray(splData.SPL) || splData.SPL.length === 0) {
+          console.warn('⚠️ SPL data is not a valid array');
+          return [60, 120];
+        }
+        
+        // Check if it's already a flat array
+        if (splData.SPL.every(item => typeof item === 'number')) {
+          flatSpl = splData.SPL as number[];
+        } else if (splData.SPL.every(item => Array.isArray(item))) {
+          // It's a 2D array - flatten it safely
+          flatSpl = [];
+          for (const row of splData.SPL) {
+            if (Array.isArray(row)) {
+              for (const value of row) {
+                if (typeof value === 'number' && isFinite(value)) {
+                  flatSpl.push(value);
+                }
+              }
+            }
+          }
+        } else {
+          // Mixed types or unknown structure - use limited flatten
+          console.warn('⚠️ Mixed SPL data types, using limited flatten');
+          flatSpl = splData.SPL.flat(2);
+        }
+        
+        // Limit the number of points to prevent performance issues
+        if (flatSpl.length > 100000) {
+          console.warn(`⚠️ Large SPL dataset (${flatSpl.length} points), sampling for range calculation`);
+          // Sample every Nth point for large datasets
+          const step = Math.ceil(flatSpl.length / 10000);
+          flatSpl = flatSpl.filter((_, index) => index % step === 0);
+        }
+      } catch (e) {
+        console.error('❌ Error flattening SPL data:', e);
+        return [60, 120];
+      }
+      
+      if (flatSpl.length === 0) {
+        console.warn('⚠️ No SPL data found after flattening');
+        return [60, 120];
+      }
+      
+      const validSpl = flatSpl.filter(val => typeof val === 'number' && isFinite(val));
+      
+      if (validSpl.length === 0) {
+        console.warn('⚠️ No valid SPL values found');
+        return [60, 120];
+      }
+      
+      // Avoid spread operator for large arrays to prevent stack overflow
+      let minSpl = validSpl[0];
+      let maxSpl = validSpl[0];
+      
+      for (let i = 1; i < validSpl.length; i++) {
+        if (validSpl[i] < minSpl) minSpl = validSpl[i];
+        if (validSpl[i] > maxSpl) maxSpl = validSpl[i];
+      }
+      
+      const padding = (maxSpl - minSpl) * 0.1;
+      
+      console.log('📊 SPL range calculated:', { min: minSpl, max: maxSpl, count: validSpl.length });
+      
+      return [
+        Math.max(0, minSpl - padding),
+        Math.min(150, maxSpl + padding)
+      ] as [number, number];
+    } catch (error) {
+      console.error('❌ Error calculating SPL range:', error);
+      return [60, 120];
+    }
   }, [splData, splRange]);
 
   // Professional plot data preparation
