@@ -327,5 +327,6 @@ if __name__ == "__main__":
         reload=True,
         log_level="info",
         ws_ping_interval=30,
-        ws_ping_timeout=10
+        ws_ping_timeout=10,
+        ws_max_size=16777216  # 16MB WebSocket message limit
     )

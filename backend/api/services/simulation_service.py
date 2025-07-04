@@ -68,7 +68,7 @@ class SimulationService:
         
         # Configuration
         self.max_simulations_per_session = 3
-        self.chunk_size = 1000  # Grid points per chunk
+        self.chunk_size = 100  # Grid points per chunk (reduced for WebSocket message size)
         self.progress_update_interval = 0.5  # seconds
         
     async def startup(self):
@@ -278,11 +278,25 @@ class SimulationService:
             simulation.progress = 20.0
             await self._send_progress_update(simulation)
             
-            config = SimulationConfig(
-                frequency=simulation.params.frequency,
-                speed_of_sound=simulation.params.speed_of_sound,
-                grid_resolution=simulation.params.grid_resolution
-            )
+            # Create config with no parameters (as it doesn't accept any)
+            config = SimulationConfig()
+            
+            # Update config values using the default_values dictionary
+            # Note: SimulationConfig stores parameters in default_values, not constructor params
+            if hasattr(config, 'default_values'):
+                # Update frequency if it exists in config
+                if 'array_freq' in config.default_values:
+                    config.default_values['array_freq'] = float(simulation.params.frequency)
+                
+                # Update room vertices if they exist
+                if 'room_vertices' in config.default_values:
+                    config.default_values['room_vertices'] = simulation.params.room_vertices
+            
+            # Update acoustic parameters (speed of sound is there)
+            if hasattr(config, 'acoustic_params'):
+                config.acoustic_params['speed_of_sound'] = float(simulation.params.speed_of_sound)
+            
+            logger.info(f"🔧 Configured simulation with frequency={simulation.params.frequency}, speed_of_sound={simulation.params.speed_of_sound}")
             
             # Step 3: Calculate SPL with chunked streaming
             simulation.current_step = "calculating_spl"
@@ -380,9 +394,9 @@ class SimulationService:
                 chunk_SPL = calculate_spl_vectorized(
                     chunk_grid_X.flatten(),
                     chunk_grid_Y.flatten(),
-                    sources_array,
-                    config.frequency,
-                    config.speed_of_sound
+                    simulation.params.frequency,
+                    simulation.params.speed_of_sound,
+                    sources_array
                 ).reshape(chunk_grid_X.shape)
                 
                 # Create chunk data
@@ -457,9 +471,22 @@ class SimulationService:
         """Convert sources to NumPy array for calculations"""
         sources_array = np.zeros(len(sources), dtype=SUB_DTYPE)
         for i, source in enumerate(sources):
+            # Convert gain_db to linear gain for pressure calculation
+            gain_linear = 10**(source.gain_db / 20.0)
+            
+            # Convert SPL RMS to pressure value at 1m (relative to reference pressure)
+            # Standard reference pressure: 20e-6 Pa
+            p_ref = 20e-6
+            pressure_val = p_ref * (10**(source.spl_rms / 20.0))
+            
             sources_array[i] = (
-                source.x, source.y, source.spl_rms, source.gain_db,
-                source.delay_ms, source.angle, source.polarity
+                source.x,                    # x
+                source.y,                    # y  
+                pressure_val,                # pressure_val_at_1m_relative_to_pref
+                gain_linear,                 # gain_lin
+                source.angle,                # angle
+                source.delay_ms,            # delay_ms
+                source.polarity             # polarity
             )
         return sources_array
         
@@ -551,14 +578,18 @@ class SimulationService:
         try:
             # Create minimal source for calculation (simplified)
             # In a real implementation, this would use the current project's sources
-            sources_array = np.array([(x, y, 105.0, 0.0, 0.0, 0.0, 1)], dtype=SUB_DTYPE)
+            # Create a test source with proper SUB_DTYPE structure
+            p_ref = 20e-6
+            test_spl = 105.0  # dB SPL
+            pressure_val = p_ref * (10**(test_spl / 20.0))
+            sources_array = np.array([(x, y, pressure_val, 1.0, 0.0, 0.0, 1)], dtype=SUB_DTYPE)
             
             # Quick calculation
             point_x = np.array([x])
             point_y = np.array([y])
             
             spl_result = calculate_spl_vectorized(
-                point_x, point_y, sources_array, frequency, 343.0
+                point_x, point_y, frequency, 343.0, sources_array
             )
             
             return float(spl_result[0]) if len(spl_result) > 0 else 0.0
